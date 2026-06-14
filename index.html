@@ -1333,6 +1333,101 @@ body::before{content:"";position:fixed;inset:0;background-image:linear-gradient(
   <div class="trow"><div class="tterm-key">AWS Certificate Manager (ACM)</div><div class="tterm-val">Provision, manage, and deploy SSL/TLS certificates for use with CloudFront, ALB, and API Gateway. Public certificates are <strong>free</strong>. Automatic renewal. CloudFront certificates must be in <code>us-east-1</code>.</div></div>
 </div>
 
+<div class="slabel">AWS KMS — deep dive</div>
+<div class="exam-tip"><span class="et-icon">&#127947;</span><div><strong>Exam focus:</strong> Know all three key ownership tiers, the difference between symmetric and asymmetric, how envelope encryption works, when key policies vs IAM policies apply, multi-region key use cases, and the 7-to-30 day deletion window. KMS is the encryption backbone for almost every AWS service.</div></div>
+
+<div class="cmp-grid">
+  <div class="cmp-box"><div class="cmp-label" style="color:var(--text2)">AWS Owned Keys</div><div class="cmp-body">
+  • Created and managed entirely by AWS for its own service operations<br>
+  • <strong>You cannot view, audit, rotate, or delete them</strong><br>
+  • No cost, no CloudTrail visibility for key usage<br>
+  • Used as the default for many services (DynamoDB, SQS SSE, S3 SSE-S3)<br>
+  • Shared across AWS accounts — not dedicated to your account<br>
+  • Not suitable for compliance requirements needing key control</div></div>
+  <div class="cmp-box"><div class="cmp-label" style="color:var(--accent)">AWS Managed Keys</div><div class="cmp-body">
+  • Created by AWS on your behalf when you enable encryption for a service<br>
+  • Named <code>aws/&lt;service&gt;</code> — e.g. <code>aws/s3</code>, <code>aws/rds</code>, <code>aws/ebs</code>, <code>aws/lambda</code><br>
+  • <strong>Visible in your account</strong> in KMS console; can view key policy but cannot edit it<br>
+  • <strong>Automatically rotated every year</strong> — you cannot disable or change this<br>
+  • Cannot be used for cross-account encryption<br>
+  • CloudTrail logs key usage — you can audit which principals used the key<br>
+  • Free to use (no per-key cost); API call costs still apply</div></div>
+  <div class="cmp-box"><div class="cmp-label" style="color:var(--green)">Customer Managed Keys (CMK)</div><div class="cmp-body">
+  • You create, own, and control — full lifecycle management<br>
+  • <strong>Custom key policy</strong>: define exactly who can use and who can manage the key<br>
+  • Rotation: optional annual auto-rotation (you enable it) or manual on-demand rotation<br>
+  • Can be used for <strong>cross-account encryption</strong> — share via key policy<br>
+  • Deletion: schedule deletion with 7–30 day waiting period (no immediate delete)<br>
+  • Full CloudTrail audit trail for every encrypt/decrypt/generate operation<br>
+  • <strong>$1/month per key</strong> + $0.03 per 10,000 API calls<br>
+  • Required for: custom key policies, cross-account sharing, compliance mandates</div></div>
+</div>
+
+<div class="slabel" style="margin-top:16px">Symmetric vs Asymmetric KMS keys</div>
+<div class="cmp-grid">
+  <div class="cmp-box"><div class="cmp-label" style="color:var(--accent)">Symmetric (AES-256)</div><div class="cmp-body">
+  • <strong>Single 256-bit key</strong> used for both encrypt and decrypt<br>
+  • The actual key material <strong>never leaves AWS KMS unencrypted</strong> — all encrypt/decrypt operations happen inside the HSM<br>
+  • Only your code calls KMS APIs; the key itself is never exposed<br>
+  • Default and most common type — used by all AWS service integrations (S3, RDS, EBS, Lambda, etc.)<br>
+  • Use cases: at-rest encryption for AWS services, envelope encryption data keys<br>
+  • Supports: <code>Encrypt</code>, <code>Decrypt</code>, <code>GenerateDataKey</code>, <code>GenerateDataKeyWithoutPlaintext</code>, <code>ReEncrypt</code></div></div>
+  <div class="cmp-box"><div class="cmp-label" style="color:var(--purple)">Asymmetric (RSA / ECC)</div><div class="cmp-body">
+  • <strong>Public/private key pair</strong> — public key can be downloaded and used outside AWS<br>
+  • RSA: 2048, 3072, or 4096-bit. ECC: P-256, P-384, secp256k1<br>
+  • <strong>Private key never leaves KMS</strong>; public key is downloadable<br>
+  • Use cases: digital signatures, encryption by external parties who call KMS to decrypt<br>
+  • Sign/Verify operations: private key signs, public key verifies (or vice versa)<br>
+  • Cannot be used with AWS service integrations (S3, EBS, etc.) — those require symmetric keys<br>
+  • Useful when the encrypting party is outside AWS (they use your public key locally)</div></div>
+</div>
+
+<div class="slabel" style="margin-top:16px">Envelope encryption — how it works</div>
+<div class="tterm">
+  <div class="trow"><div class="tterm-key">Why envelope encryption?</div><div class="tterm-val">KMS can directly encrypt a maximum of <strong>4 KB</strong> per API call. Most real data (files, database records, blobs) is much larger. The solution: never send large data to KMS — instead, use KMS to encrypt a small <em>data key</em>, then use that data key locally to encrypt the large payload.</div></div>
+  <div class="trow"><div class="tterm-key">GenerateDataKey</div><div class="tterm-val">KMS returns <strong>two copies</strong> of a new data key: (1) a <strong>plaintext copy</strong> in memory — use this immediately to encrypt your data; (2) an <strong>encrypted copy</strong> (ciphertext blob, encrypted under your CMK) — store this alongside your encrypted data. Then discard the plaintext key from memory. To decrypt later: call KMS <code>Decrypt</code> with the encrypted data key → get back the plaintext data key → use it locally to decrypt your data.</div></div>
+  <div class="trow"><div class="tterm-key">GenerateDataKeyWithoutPlaintext</div><div class="tterm-val">KMS generates a data key but returns <strong>only the encrypted copy</strong> — no plaintext. Use when you want to provision encrypted data keys in advance without ever holding the plaintext (e.g., store encrypted data keys in a database; decrypt on demand only when needed).</div></div>
+  <div class="trow"><div class="tterm-key">ReEncrypt</div><div class="tterm-val">Re-encrypts ciphertext under a different CMK entirely within KMS — <strong>the plaintext never leaves KMS</strong>. Use for key rotation when you need to migrate encrypted data from an old key to a new key without decrypting on the client side. Also used to move encrypted data between accounts.</div></div>
+  <div class="trow"><div class="tterm-key">Data key caching</div><div class="tterm-val">The AWS Encryption SDK supports <strong>data key caching</strong>: reuse a data key for multiple encrypt operations within a configurable TTL or use limit instead of calling KMS for every single operation. Reduces API call costs and latency for high-throughput applications. Trade-off: reusing a key means more data encrypted under the same key material.</div></div>
+</div>
+
+<div class="slabel" style="margin-top:16px">KMS key policies and access control</div>
+<div class="tterm">
+  <div class="trow"><div class="tterm-key">Key policy — the root of access</div><div class="tterm-val">Every CMK has exactly <strong>one key policy</strong> (a resource-based policy). Unlike most AWS resources, <strong>IAM policies alone cannot grant KMS access</strong> — the key policy must explicitly allow it. The default key policy grants the AWS account root user full access, which means IAM policies in that account can then further delegate permissions. If you remove this default statement, even the root user cannot access the key without direct console intervention.</div></div>
+  <div class="trow"><div class="tterm-key">Key administrators vs key users</div><div class="tterm-val"><strong>Key administrators</strong>: can manage the key (update policy, enable/disable, schedule deletion, create grants) but cannot use the key for cryptographic operations (encrypt/decrypt) unless explicitly granted. <strong>Key users</strong>: can use the key for encrypt/decrypt/sign operations but cannot manage the key's lifecycle. Best practice: separate admin and usage roles — your application role should be a key user, not an administrator.</div></div>
+  <div class="trow"><div class="tterm-key">Grants</div><div class="tterm-val">A <strong>grant</strong> is a programmatic, temporary delegation of key access — without modifying the key policy. AWS services like EBS, RDS, and SSM use grants internally to use your CMK on your behalf. You can create grants via the API; each grant targets one principal and specifies allowed operations. Grants are audited in CloudTrail. Retire a grant to revoke access immediately.</div></div>
+  <div class="trow"><div class="tterm-key">Cross-account key sharing</div><div class="tterm-val">To allow another AWS account to use your CMK: (1) add the external account principal to the key policy; (2) the external account must also grant IAM permissions to its principals. Both sides must allow — just a key policy change is not enough without the IAM policy on the consuming account.</div></div>
+  <div class="trow"><div class="tterm-key">ViaService condition</div><div class="tterm-val">Key policy condition <code>kms:ViaService</code> restricts key usage to specific AWS services only. Example: allow decrypt only when the request comes from <code>s3.us-east-1.amazonaws.com</code> — an EC2 instance cannot directly call Decrypt with this key, but S3 can use it for SSE-KMS. Useful for tightly scoping a key to one service.</div></div>
+</div>
+
+<div class="slabel" style="margin-top:16px">Key rotation and deletion</div>
+<div class="tterm">
+  <div class="trow"><div class="tterm-key">Automatic key rotation</div><div class="tterm-val">When enabled on a CMK, KMS <strong>rotates the key material every year</strong>. The key ID and ARN stay the same — all existing ciphertext remains decryptable because KMS retains all prior key material versions. New encryptions use the latest material. Rotation is transparent to applications. <strong>AWS Managed Keys rotate annually automatically</strong> (cannot be disabled). Asymmetric CMKs and keys with imported material <strong>do not support automatic rotation</strong>.</div></div>
+  <div class="trow"><div class="tterm-key">Manual / on-demand rotation</div><div class="tterm-val">You can trigger a manual rotation at any time (beyond the annual auto schedule) via <code>RotateKeyOnDemand</code> API. Also: create a new CMK and update your application/service to use the new Key ARN — this is the only option for asymmetric keys, imported material keys, and cases where you want to change key specs or origin. Old key must be kept enabled until all ciphertext encrypted under it has been re-encrypted or is no longer needed.</div></div>
+  <div class="trow"><div class="tterm-key">Key deletion — waiting period</div><div class="tterm-val">You <strong>cannot immediately delete a CMK</strong>. Schedule deletion with a waiting period of <strong>7–30 days</strong> (default 30 days). During the waiting period: key is disabled, all cryptographic operations fail, and the deletion can be cancelled. After the window, deletion is permanent and irreversible — any ciphertext encrypted under that key becomes permanently unrecoverable. Use CloudTrail and CloudWatch alarms to detect attempted key usage during the waiting period before confirming deletion.</div></div>
+  <div class="trow"><div class="tterm-key">Disable vs Delete</div><div class="tterm-val"><strong>Disable:</strong> key is temporarily deactivated — no encrypt/decrypt operations succeed, but the key and all its metadata are preserved. Can be re-enabled instantly. <strong>Delete:</strong> permanent and irreversible after the waiting period — key material, metadata, and all backups destroyed. Best practice: disable first, monitor CloudTrail for "InvalidKeyState" errors for 30 days, then delete if no usage detected.</div></div>
+  <div class="trow"><div class="tterm-key">Imported key material</div><div class="tterm-val">You can import your own key material from outside AWS into a CMK (key origin = EXTERNAL). Use cases: regulatory requirements to generate key material in your own HSM; zero-trust policies where AWS should not generate keys. Limitations: automatic rotation is not supported (you must rotate by importing new material); if you delete the imported material, ciphertext becomes permanently unrecoverable unless you re-import the same material. You must manage the external key material's backup and security.</div></div>
+</div>
+
+<div class="slabel" style="margin-top:16px">Multi-Region keys</div>
+<div class="tterm">
+  <div class="trow"><div class="tterm-key">What are multi-Region keys?</div><div class="tterm-val">A set of KMS keys in <strong>different AWS regions that share the same key material and key ID prefix</strong> (<code>mrk-</code>). Data encrypted in one region can be decrypted in another region using the replica key — without re-encrypting. Standard (single-region) keys cannot do this; ciphertext from us-east-1 is not decryptable using a different key in us-west-2 even if both keys have identical material.</div></div>
+  <div class="trow"><div class="tterm-key">Primary and replica keys</div><div class="tterm-val">One region holds the <strong>primary key</strong>; other regions hold <strong>replica keys</strong>. You create replicas from the primary. The primary can be promoted to a replica (and a replica promoted to primary) for disaster recovery. Replicas are independent KMS resources — they have their own key policies, grants, and tags, but share key material.</div></div>
+  <div class="trow"><div class="tterm-key">Multi-Region use cases</div><div class="tterm-val">• <strong>Global DynamoDB tables</strong>: encrypt items in one region, read and decrypt them in a replica region without application changes<br>• <strong>Multi-region active-active DR</strong>: failover without re-encrypting your data after switching regions<br>• <strong>Distributed signing</strong>: sign in one region, verify in another using the same key material<br>• <strong>Client-side encryption across regions</strong>: encrypt once, decrypt anywhere the replica exists</div></div>
+  <div class="trow"><div class="tterm-key">Multi-Region limitations</div><div class="tterm-val">Not all services support multi-Region keys (many only accept single-region CMKs). Pricing: $1/month per key per region (primary + each replica). Rotation: rotating the primary does not automatically rotate replicas — you must sync rotation. Key policies are per-region and must be managed independently.</div></div>
+</div>
+
+<div class="slabel" style="margin-top:16px">KMS service integrations — common patterns</div>
+<div class="tterm">
+  <div class="trow"><div class="tterm-key">S3 SSE-KMS</div><div class="tterm-val">S3 calls <code>GenerateDataKey</code> on your CMK for each object (or batches for small objects). The encrypted data key is stored as object metadata. On download, S3 calls <code>Decrypt</code> to recover the data key, then decrypts the object. You need <code>kms:GenerateDataKey</code> and <code>kms:Decrypt</code> on the key. S3 Bucket Keys: generate a short-lived bucket-level data key to reduce per-object KMS API calls by up to 99% — significant cost reduction for high-object-count buckets.</div></div>
+  <div class="trow"><div class="tterm-key">EBS encryption</div><div class="tterm-val">When you encrypt an EBS volume, EC2 uses a CMK to generate a data key. The data key encrypts all data written to the volume. Snapshots of encrypted volumes are automatically encrypted with the same key. Volumes restored from encrypted snapshots are encrypted. You can re-encrypt a snapshot under a different key using <code>copy snapshot</code> with a new KMS key — this is how you change the CMK for existing EBS data.</div></div>
+  <div class="trow"><div class="tterm-key">RDS / Aurora encryption</div><div class="tterm-val">Must be enabled <strong>at creation time</strong> — you cannot encrypt an existing unencrypted RDS instance in place. Workaround: create snapshot → copy snapshot with encryption → restore from encrypted snapshot. The CMK encrypts the underlying storage, automated backups, read replicas, and snapshots. Read replicas of encrypted instances must be encrypted (can use a different CMK in a different region).</div></div>
+  <div class="trow"><div class="tterm-key">Lambda environment variable encryption</div><div class="tterm-val">Lambda encrypts environment variables at rest using a CMK. By default uses an AWS Managed Key (<code>aws/lambda</code>). Specify a CMK to use your own key for stricter control. For in-transit encryption (while values are transmitted to Lambda during function init), you can enable "encryption helpers" which encrypt the values with an additional KMS call client-side.</div></div>
+  <div class="trow"><div class="tterm-key">SSM Parameter Store SecureString</div><div class="tterm-val">Parameters of type SecureString are encrypted by KMS. <strong>Standard tier</strong>: uses only the account's default AWS Managed Key (<code>aws/ssm</code>) — you cannot specify a CMK. <strong>Advanced tier</strong>: supports CMK. To use a CMK for SecureString parameters, the caller needs both SSM permissions AND the KMS key permissions (<code>kms:Decrypt</code> on GetParameter, <code>kms:GenerateDataKey</code> on PutParameter).</div></div>
+  <div class="trow"><div class="tterm-key">Secrets Manager + KMS</div><div class="tterm-val">Every secret in Secrets Manager is encrypted by KMS using envelope encryption. Default: AWS Managed Key (<code>aws/secretsmanager</code>). Specify a CMK for: cross-account access to a secret (the key policy must allow the external account), stricter audit requirements, or separation of duty (different teams manage the key vs the secret). When a Lambda rotates a secret, it needs both Secrets Manager and KMS permissions.</div></div>
+</div>
+<div class="callout c-info"><strong>S3 Bucket Key exam tip:</strong> When SSE-KMS is used without Bucket Keys, S3 makes a KMS API call for <em>every single object</em>. For buckets with millions of objects this creates huge KMS costs and potential throttling. Enabling <strong>S3 Bucket Keys</strong> generates a short-lived key at the bucket level, reducing KMS API calls by ~99%. Always enable Bucket Keys for high-volume SSE-KMS buckets.</div>
+
 <div class="slabel">Threat detection and protection</div>
 <div class="grid-2">
   <div class="card"><div class="card-header"><div class="card-icon ci-red">&#128679;</div><div class="card-title">Amazon Inspector</div></div><div class="card-body">Automated <strong>vulnerability scanning</strong> for EC2, Lambda, and container images. Finds OS vulnerabilities and unintended network exposure. Continuous scanning, not one-time. Produces a risk score and recommended remediation.</div></div>
