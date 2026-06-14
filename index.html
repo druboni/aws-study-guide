@@ -2213,7 +2213,7 @@ const QUESTIONS = [
     opts:["S3 Standard","S3 Standard-IA","S3 Glacier Deep Archive","S3 Glacier Instant Retrieval"], ans:2,
     exp:"S3 Glacier Deep Archive is designed for long-term archival with retrieval times of 12–48 hours. It has the lowest storage cost and is ideal for data rarely or never accessed." },
   { q:"An EBS volume is attached to an EC2 instance in us-east-1a. You need to use the data in us-east-1b. What is the correct process?",
-    opts:["Detach the volume and reattach in the other AZ","Create an EBS Multi-Attach in the other AZ","Create a snapshot, copy it, create a new volume in us-east-1b from the copy","EBS volumes can be accessed across AZs automatically"], ans:2,
+    opts:["Detach the volume and reattach in the other AZ","Create an EBS Multi-Attach in the other AZ","Create a snapshot, then create a new volume from it in us-east-1b","EBS volumes can be accessed across AZs automatically"], ans:2,
     exp:"EBS volumes are AZ-specific. To move data across AZs: create a snapshot (stored in S3), create a new volume from the snapshot in the target AZ." },
   // CH6 – DNS & LB
   { q:"A company wants to route users to the nearest AWS region for their web application to minimize latency. Which Route 53 routing policy should they use?",
@@ -2244,7 +2244,7 @@ const QUESTIONS = [
   // CH8 – Migrations
   { q:"A company has 2 PB of data on-premises and needs to migrate it to S3. Their internet connection is 1 Gbps. Which service is most practical?",
     opts:["AWS DataSync over internet","AWS Direct Connect","AWS Snowball Edge","AWS Transfer Family"], ans:2,
-    exp:"2 PB over 1 Gbps would take ~18 days of solid transfer (ignoring overhead). AWS Snowball Edge allows physical shipment of data — faster and more practical for large offline migrations." },
+    exp:"2 PB over a 1 Gbps link would take ~185 days (about 6 months) at theoretical line rate — far longer in practice. AWS Snowball Edge ships the data physically, which is dramatically faster and more practical for large offline migrations." },
   { q:"AWS DataSync supports migration to which storage services? (Choose all that apply — pick the most complete correct answer)",
     opts:["S3, EFS, FSx, and EBS","S3, EFS, and FSx only (not EBS)","EBS and EFS only","S3 only"], ans:1,
     exp:"DataSync does NOT support migration to EBS. It supports S3, EFS, FSx for Windows, FSx for Lustre, and other file-based destinations." },
