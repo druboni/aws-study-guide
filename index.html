@@ -1911,7 +1911,7 @@ body::before{content:"";position:fixed;inset:0;background-image:linear-gradient(
 </div>
 <div class="quiz-meta">
   <div class="qscore">Score: <span id="scoreVal">0</span> / <span id="scoreTotal">0</span> answered</div>
-  <button class="reset-btn" onclick="resetQuiz()">&#8635; Reset Quiz</button>
+  <button class="reset-btn" onclick="resetQuiz()">&#8635; Reset &amp; Shuffle</button>
 </div>
 <div class="qprogbar"><div class="qprogfill" id="qprogfill" style="width:0%"></div></div>
 <div id="quizBody"></div>
@@ -2416,15 +2416,45 @@ const QUESTIONS = [
 ];
 
 let scores = {};
+let quizView = [];        // questions in current display order (with possibly-shuffled options)
+let quizShuffled = false; // true once the user has hit Reset & Shuffle
+
+function shuffleInPlace(a) {
+  for(let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+function buildQuizView(shuffle) {
+  let order = QUESTIONS.map((_, i) => i);
+  if(shuffle) shuffleInPlace(order);
+  quizView = order.map(idx => {
+    const src = QUESTIONS[idx];
+    let optOrder = src.opts.map((_, j) => j);
+    if(shuffle) shuffleInPlace(optOrder);
+    return {
+      q: src.q,
+      opts: optOrder.map(j => src.opts[j]),
+      ans: optOrder.indexOf(src.ans),   // new index of the correct answer
+      exp: src.exp
+    };
+  });
+}
 function renderQuiz() {
   if(document.getElementById('quizBody').innerHTML) return;
+  if(!quizView.length) buildQuizView(false);
+  const letters = ['A','B','C','D'];
   let html = '';
-  QUESTIONS.forEach((q, i) => {
-    const letters = ['A','B','C','D'];
-    if(i === 0) html += `<div class="slabel">Book-aligned questions</div>`;
-    if(i === 49) html += `<div class="slabel" style="margin-top:30px">Original exam-style scenarios (beyond the book)</div>`;
+  quizView.forEach((q, i) => {
+    if(!quizShuffled) {
+      if(i === 0) html += `<div class="slabel">Book-aligned questions</div>`;
+      if(i === 49) html += `<div class="slabel" style="margin-top:30px">Original exam-style scenarios (beyond the book)</div>`;
+    } else if(i === 0) {
+      html += `<div class="slabel">&#127922; Randomized order &middot; ${quizView.length} questions</div>`;
+    }
     html += `<div class="qcard" id="qc${i}">
-      <div class="qnum">QUESTION ${i+1} / ${QUESTIONS.length}</div>
+      <div class="qnum">QUESTION ${i+1} / ${quizView.length}</div>
       <div class="qtext">${q.q}</div>
       ${q.opts.map((o,j) => `<button class="qopt" id="qo${i}_${j}" onclick="answer(${i},${j})"><span class="qletter">${letters[j]}</span>${o}</button>`).join('')}
       <div class="qexp" id="qe${i}"><strong>Explanation:</strong> ${q.exp}</div>
@@ -2435,11 +2465,12 @@ function renderQuiz() {
 }
 function answer(qi, choice) {
   if(scores[qi] !== undefined) return;
-  scores[qi] = choice === QUESTIONS[qi].ans ? 1 : 0;
+  const correct = quizView[qi].ans;
+  scores[qi] = choice === correct ? 1 : 0;
   const opts = document.querySelectorAll(`[id^="qo${qi}_"]`);
   opts.forEach(o => o.disabled = true);
-  opts[QUESTIONS[qi].ans].classList.add('correct');
-  if(choice !== QUESTIONS[qi].ans) opts[choice].classList.add('wrong');
+  opts[correct].classList.add('correct');
+  if(choice !== correct) opts[choice].classList.add('wrong');
   document.getElementById(`qe${qi}`).classList.add('show');
   updateQuizProgress();
 }
@@ -2456,8 +2487,11 @@ function updateQuizProgress() {
 }
 function resetQuiz() {
   scores = {};
+  quizShuffled = true;
+  buildQuizView(true);                              // shuffle question order + answer options
   document.getElementById('quizBody').innerHTML = '';
   renderQuiz();
+  document.getElementById('quizBody').scrollIntoView({behavior:'smooth', block:'start'});
 }
 </script>
 </body>
